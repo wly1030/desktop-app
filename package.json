@@ -1,0 +1,54 @@
+{
+  "name": "tongji-desktop-app",
+  "private": true,
+  "version": "0.0.0",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && electron-builder",
+    "build:linux": "vite build && electron-builder --linux",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.0.0",
+    "axios": "^1.6.0",
+    "echarts": "^6.0.0",
+    "element-plus": "^2.4.0",
+    "vue": "^3.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.0.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "vite": "^4.5.3",
+    "vite-plugin-electron": "^0.15.0",
+    "vite-plugin-electron-renderer": "^0.14.0"
+  },
+  "build": {
+    "appId": "com.tongji.app",
+    "productName": "TongjiDataAnalysis",
+    "copyright": "Copyright © 2024",
+    "directories": {
+      "output": "dist_app"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    }
+  }
+}
