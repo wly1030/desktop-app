@@ -16,11 +16,14 @@
       <el-main v-loading="loading" element-loading-text="正在加载数据..." element-loading-background="rgba(255, 255, 255, 0.8)">
         <div class="content-wrapper">
           <div v-if="hasData" class="result-area">
-            <!-- <div class="result-header">
-              <h3>数据分析图预览</h3>
-              <el-tag type="success" effect="dark">Yade 仿生图</el-tag>
-            </div> -->
-            <div class="chart-container" ref="chartRef"></div>
+            <div class="chart-section">
+              <h3 class="chart-title">收敛监控 (Iteration vs Unbalanced Force / Top Position)</h3>
+              <div class="chart-container" ref="chart1Ref"></div>
+            </div>
+            <div class="chart-section">
+              <h3 class="chart-title">剪切应力-位移曲线 (Displacement vs Shear Stress)</h3>
+              <div class="chart-container" ref="chart2Ref"></div>
+            </div>
           </div>
           <div v-else class="empty-state">
              <el-empty description="暂无生成结果，请编辑参数进行生成" :image-size="200">
@@ -73,224 +76,230 @@ const loading = ref(false)
 const submitLoading = ref(false)
 const dialogVisible = ref(false)
 const hasData = ref(false)
-const chartRef = ref(null)
-let chartInstance = null
+const chart1Ref = ref(null)
+const chart2Ref = ref(null)
+let chart1Instance = null
+let chart2Instance = null
 
 const defaultParams = {
-  "inRadius": "15",
-  "leftTensionPos": "-0.07",
-  "rightTensionPos": "2.79",
-  "normalStiffness": "100000",
+  "in_radius": "15",
+  "left_tension_pos": "-0.07",
+  "right_tension_pos": "2.79",
+  "normal_stiffness": "100000",
   "vel": "-0.681462",
   "box_n": "1.0",
   "damping": "0.4",
   "alpha": "1e4",
   "gravity": "0,0,0",
-  "iterPeriod": "10",
-  "interactionDetectionFactor": "1",
-  "aabbEnlargeFactor": "1",
+  "iter_period": "10",
+  "interaction_detection_factor": "1",
+  "aabb_enlarge_factor": "1",
   "young1": "1e9",
   "poisson1": ".4",
-  "frictionAngle1_radians": "40",
+  "friction_angle1_radians": "40",
   "density1": "2650",
   "young2": "1e9",
-  "poisson2": "0.4",                                            
-  "frictionAngle2": "0",
+  "poisson2": "0.4",
+  "friction_angle2": "0",
   "density2": "2600",
-  "geom.facetBox1_1_1": ".5",
-  "geom.facetBox1_1_2": ".5",
-  "geom.facetBox1_1_3": "0.6124/2+0.05",
-  "geom.facetBox1_2_1": ".5",
-  "geom.facetBox1_2_2": ".5",
-  "geom.facetBox1_2_3": "0.6124/2+0.05",
-  "geom.facetBox2_1_1": ".5",
-  "geom.facetBox2_1_2": ".5",
-  "geom.facetBox2_1_3": "-0.6124/2-0.005",
-  "geom.facetBox2_2_1": ".5",
-  "geom.facetBox2_2_2": ".5",
-  "geom.facetBox2_2_3": "0.6124/2",
+  "geom_facet_box1_1_1": ".5",
+  "geom_facet_box1_1_2": ".5",
+  "geom_facet_box1_1_3": "0.6124/2+0.05",
+  "geom_facet_box1_2_1": ".5",
+  "geom_facet_box1_2_2": ".5",
+  "geom_facet_box1_2_3": "0.6124/2+0.05",
+  "geom_facet_box2_1_1": ".5",
+  "geom_facet_box2_1_2": ".5",
+  "geom_facet_box2_1_3": "-0.6124/2-0.005",
+  "geom_facet_box2_2_1": ".5",
+  "geom_facet_box2_2_2": ".5",
+  "geom_facet_box2_2_3": "0.6124/2",
   "mass": "1000000",
   "dt": ".5",
-  "setPermF1": "0",
-  "setPermF2": "0",
-  "setPermF3": "-1",
-  "O.iter1": "50000",
-  "O.iter2": "% 100000",
+  "set_perm_f1": "0",
+  "set_perm_f2": "0",
+  "set_perm_f3": "-1",
+  "o_iter1": "50000",
+  "o_iter2": "% 100000",
   "dspl": "0.01"
 }
 
 const formData = reactive({ ...defaultParams })
 
-// Mock API Functions
-const mockGetLastParams = () => {
-    return new Promise((resolve) => {
-        setTimeout(() => {
-            // Check localStorage
-            const saved = localStorage.getItem('lastParams')
-            if (saved) {
-                resolve({ data: { ...defaultParams, ...JSON.parse(saved) } })
-            } else {
-                // Return default empty map or some defaults
-                resolve({ data: { ...defaultParams } })
-            }
-        }, 800)
-    })
+const API_BASE = 'http://localhost:8000'
+
+// 从 localStorage 恢复上次的参数
+const loadLastParams = () => {
+    const saved = localStorage.getItem('lastParams')
+    if (saved) {
+        return { ...defaultParams, ...JSON.parse(saved) }
+    }
+    return { ...defaultParams }
 }
 
-// 模拟接口调用，实际项目中应替换为真实的 axios 请求
+// 调用后端 API 运行脚本并获取数据
 const fetchChartData = async (params) => {
-    return new Promise((resolve) => {
-        setTimeout(() => {
-            localStorage.setItem('lastParams', JSON.stringify(params))
-            
-            // 模拟 Yade 仿生图数据 (散点图/气泡图模拟颗粒分布)
-            // 使用 inRadius 参数作为乘数来影响生成的颗粒数量或大小
-            const multiplier = Number(params.inRadius) || 15;
-            const particleCount = 20 * multiplier;
-            const data = [];
-            
-            for (let i = 0; i < particleCount; i++) {
-                // 随机生成颗粒的 x, y 坐标和半径大小
-                const x = Math.random() * 100;
-                const y = Math.random() * 100;
-                const radius = Math.random() * 5 + 1; // 半径 1-6
-                // 模拟不同材质或受力状态的颜色映射值
-                const stress = Math.random() * 100; 
-                data.push([x, y, radius, stress]);
-            }
-
-            resolve({ 
-                data: {
-                    particles: data
-                } 
-            })
-        }, 1000)
+    localStorage.setItem('lastParams', JSON.stringify(params))
+    const res = await axios.post(`${API_BASE}/api/run`, {
+        script_name: 'mock_simulation.py',
+        params: params,
+        timeout: 600
     })
+    if (!res.data.success) {
+        throw new Error(res.data.error || '脚本执行失败')
+    }
+    // 从 data 中提取 result.json 的内容
+    const resultData = res.data.data?.['result.json']
+    if (!resultData) {
+        throw new Error('未获取到输出数据')
+    }
+    return { data: resultData }
 }
 
-const renderChart = (data) => {
-    if (!chartRef.value) return
-    if (!chartInstance) {
-        chartInstance = echarts.init(chartRef.value)
-    }
-    
-    const option = {
-        title: {
-        },
-        backgroundColor: 'transparent',
-        tooltip: {
-            trigger: 'item',
-            backgroundColor: 'rgba(255, 255, 255, 0.9)',
-            borderColor: '#e4e7ed',
-            textStyle: {
-                color: '#303133'
+const renderCharts = (data) => {
+    // ====== 图1: 收敛监控 (双Y轴) ======
+    if (chart1Ref.value) {
+        if (!chart1Instance) {
+            chart1Instance = echarts.init(chart1Ref.value)
+        }
+        chart1Instance.setOption({
+            backgroundColor: 'transparent',
+            tooltip: {
+                trigger: 'axis',
+                backgroundColor: 'rgba(255,255,255,0.95)',
+                borderColor: '#e4e7ed',
+                textStyle: { color: '#303133' }
             },
-            formatter: function (params) {
-                return `X: ${params.data[0].toFixed(2)}<br/>
-                        Y: ${params.data[1].toFixed(2)}<br/>
-                        半径: ${params.data[2].toFixed(2)}<br/>
-                        受力: ${params.data[3].toFixed(2)}`;
-            }
-        },
-        grid: {
-            top: 40,
-            bottom: 40,
-            left: 60,
-            right: 100,
-            containLabel: true
-        },
-        xAxis: {
-            type: 'value',
-            name: 'X 坐标 (mm)',
-            nameLocation: 'middle',
-            nameGap: 30,
-            nameTextStyle: {
-                color: '#606266'
+            legend: {
+                data: ['Unbalanced Force', 'Top Position'],
+                top: 4,
+                textStyle: { color: '#606266' }
             },
-            axisLabel: {
-                color: '#606266'
+            grid: { top: 36, bottom: 40, left: 20, right: 20, containLabel: true },
+            xAxis: {
+                type: 'category',
+                name: 'Iteration',
+                nameLocation: 'middle',
+                nameGap: 24,
+                nameTextStyle: { color: '#606266' },
+                axisLabel: { color: '#606266' },
+                data: data.i,
+                splitLine: { show: false }
             },
-            splitLine: {
-                lineStyle: {
-                    type: 'dashed',
-                    color: '#ebeef5'
-                }
-            }
-        },
-        yAxis: {
-            type: 'value',
-            name: 'Y 坐标 (mm)',
-            nameLocation: 'middle',
-            nameGap: 40,
-            nameTextStyle: {
-                color: '#606266'
-            },
-            axisLabel: {
-                color: '#606266'
-            },
-            splitLine: {
-                lineStyle: {
-                    type: 'dashed',
-                    color: '#ebeef5'
-                }
-            }
-        },
-        visualMap: {
-            min: 0,
-            max: 100,
-            dimension: 3,
-            orient: 'vertical',
-            right: 10,
-            top: 'center',
-            text: ['高受力', '低受力'],
-            textStyle: {
-                color: '#606266'
-            },
-            calculable: true,
-            inRange: {
-                // 经典的工程软件热力图配色：蓝-青-绿-黄-红
-                color: ['#313695', '#4575b4', '#74add1', '#abd9e9', '#e0f3f8', '#ffffbf', '#fee090', '#fdae61', '#f46d43', '#d73027', '#a50026']
-            }
-        },
-        series: [
-            {
-                name: '颗粒',
-                type: 'scatter',
-                symbolSize: function (data) {
-                    return data[2] * 3; // 放大半径以便显示
+            yAxis: [
+                {
+                    type: 'value',
+                    name: 'Unbalanced',
+                    nameTextStyle: { color: '#409eff' },
+                    axisLabel: { color: '#409eff' },
+                    splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } }
                 },
-                data: data.particles,
-                itemStyle: {
-                    shadowBlur: 5,
-                    shadowColor: 'rgba(0, 0, 0, 0.1)',
-                    opacity: 0.85
+                {
+                    type: 'value',
+                    name: 'Top Y (m)',
+                    nameTextStyle: { color: '#e6a23c' },
+                    axisLabel: { color: '#e6a23c' },
+                    splitLine: { show: false }
                 }
-            }
-        ]
+            ],
+            series: [
+                {
+                    name: 'Unbalanced Force',
+                    type: 'line',
+                    yAxisIndex: 0,
+                    data: data.unbalanced,
+                    showSymbol: false,
+                    lineStyle: { width: 2, color: '#409eff' },
+                    itemStyle: { color: '#409eff' }
+                },
+                {
+                    name: 'Top Position',
+                    type: 'line',
+                    yAxisIndex: 1,
+                    data: data.top_y,
+                    showSymbol: false,
+                    lineStyle: { width: 2, color: '#e6a23c' },
+                    itemStyle: { color: '#e6a23c' }
+                }
+            ]
+        })
     }
-    
-    chartInstance.setOption(option)
+
+    // ====== 图2: 剪切应力-位移曲线 ======
+    if (chart2Ref.value) {
+        if (!chart2Instance) {
+            chart2Instance = echarts.init(chart2Ref.value)
+        }
+        chart2Instance.setOption({
+            backgroundColor: 'transparent',
+            tooltip: {
+                trigger: 'axis',
+                backgroundColor: 'rgba(255,255,255,0.95)',
+                borderColor: '#e4e7ed',
+                textStyle: { color: '#303133' },
+                formatter: function (params) {
+                    const p = params[0]
+                    return `Displacement: ${p.axisValue}<br/>Shear Stress: ${p.data} kPa`
+                }
+            },
+            grid: { top: 16, bottom: 40, left: 20, right: 20, containLabel: true },
+            xAxis: {
+                type: 'category',
+                name: 'Displacement (m)',
+                nameLocation: 'middle',
+                nameGap: 24,
+                nameTextStyle: { color: '#606266' },
+                axisLabel: { color: '#606266' },
+                data: data.dspl,
+                splitLine: { show: false }
+            },
+            yAxis: {
+                type: 'value',
+                name: 'Shear Stress (kPa)',
+                nameTextStyle: { color: '#606266' },
+                axisLabel: { color: '#606266' },
+                splitLine: { lineStyle: { type: 'dashed', color: '#ebeef5' } }
+            },
+            series: [
+                {
+                    name: 'Shear Stress',
+                    type: 'line',
+                    data: data.shearStress,
+                    showSymbol: false,
+                    lineStyle: { width: 2.5, color: '#f56c6c' },
+                    itemStyle: { color: '#f56c6c' },
+                    areaStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: 'rgba(245,108,108,0.25)' },
+                            { offset: 1, color: 'rgba(245,108,108,0.02)' }
+                        ])
+                    }
+                }
+            ]
+        })
+    }
 }
 
 // Logic
 const initData = async () => {
     loading.value = true
     try {
-        // 1. Get last params
-        const resParams = await mockGetLastParams()
-        Object.assign(formData, resParams.data)
-        
-        // 2. Fetch chart data
+        // 1. 从 localStorage 恢复参数
+        const lastParams = loadLastParams()
+        Object.assign(formData, lastParams)
+
+        // 2. 调用后端 API 获取数据
         const resData = await fetchChartData(formData)
         hasData.value = true
-        
+
         // 3. Render chart
         await nextTick()
-        renderChart(resData.data)
-        
+        renderCharts(resData.data)
+
     } catch (error) {
         console.error(error)
-        ElMessage.error('初始化数据失败')
+        // 首次加载失败不弹错误提示，只显示空状态
+        hasData.value = false
     } finally {
         loading.value = false
     }
@@ -309,7 +318,7 @@ const submitForm = async () => {
         ElMessage.success('生成成功')
         
         await nextTick()
-        renderChart(resData.data)
+        renderCharts(resData.data)
     } catch (error) {
         ElMessage.error('生成失败')
     } finally {
@@ -322,9 +331,8 @@ onMounted(() => {
     
     // 监听窗口大小变化，自适应图表
     window.addEventListener('resize', () => {
-        if (chartInstance) {
-            chartInstance.resize()
-        }
+        chart1Instance?.resize()
+        chart2Instance?.resize()
     })
 })
 
@@ -397,53 +405,52 @@ onMounted(() => {
     flex: 1;
     display: flex;
     flex-direction: column;
-    background: #ffffff;
+    background: #f4f7f9;
     width: 100%;
     height: 100%;
+    overflow-y: auto;
+    padding: 16px;
+    gap: 16px;
+    box-sizing: border-box;
 }
 
-.result-header {
+.chart-section {
+    flex: 1;
+    min-height: 0;
+    background: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 24px;
-    border-bottom: 1px solid #ebeef5;
-    background-color: #fff;
-    z-index: 5;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+    flex-direction: column;
+    overflow: hidden;
 }
 
-.result-header h3 {
+.chart-title {
     margin: 0;
-    color: #303133;
-    font-size: 16px;
+    padding: 12px 20px;
+    font-size: 15px;
     font-weight: 600;
+    color: #303133;
+    border-bottom: 1px solid #ebeef5;
     display: flex;
     align-items: center;
+    flex-shrink: 0;
 }
 
-.result-header h3::before {
+.chart-title::before {
     content: '';
     display: inline-block;
     width: 4px;
     height: 16px;
     background: #409eff;
-    margin-right: 8px;
+    margin-right: 10px;
     border-radius: 2px;
-}
-
-:deep(.el-tag--success) {
-    background-color: #f0f9eb;
-    border-color: #e1f3d8;
-    color: #67c23a;
 }
 
 .chart-container {
     flex: 1;
     width: 100%;
-    height: 100%;
-    background-color: #fafafa;
-    position: relative;
+    min-height: 280px;
 }
 
 .empty-state {
