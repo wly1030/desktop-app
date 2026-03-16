@@ -36,6 +36,12 @@
       "dist-electron/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "python",
+        "to": "python"
+      }
+    ],
     "win": {
       "target": "nsis"
     },
