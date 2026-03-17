@@ -1,60 +1,136 @@
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
+const fs = require('fs')
+const { spawn } = require('child_process')
 
-process.env.DIST = path.join(__dirname, '../dist')
-process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(__dirname, '../public')
+// 本地配置文件路径
+const userDataPath = app.getPath('userData')
+const configPath = path.join(userDataPath, 'form-config.json')
 
-let win = null
+let mainWindow
 
 function createWindow() {
-  win = new BrowserWindow({
-    icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+  mainWindow = new BrowserWindow({
+    width: 900,
+    height: 750,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
       contextIsolation: true,
+      nodeIntegration: false,
     },
-    width: 1200,
-    height: 800,
-    autoHideMenuBar: true, // 隐藏菜单栏
   })
 
-  // Test active push message to Renderer-process.
-  win.webContents.on('did-finish-load', () => {
-    win?.webContents.send('main-process-message', (new Date).toLocaleString())
-  })
+  // 隐藏顶部默认菜单
+  mainWindow.setMenu(null)
 
-  if (process.env.VITE_DEV_SERVER_URL) {
-    win.loadURL(process.env.VITE_DEV_SERVER_URL)
-    win.webContents.openDevTools() // 本地运行自动打开调试工具
+  // 默认打开控制台（DevTools）
+  mainWindow.webContents.openDevTools()
+
+  // 开发环境加载 vite dev server，生产环境加载打包后的文件
+  if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
+    const url = process.argv.find(arg => arg.startsWith('http'))
+    mainWindow.loadURL(url || 'http://localhost:5173')
   } else {
-    // win.loadFile('dist/index.html')
-    win.loadFile(path.join(process.env.DIST, 'index.html'))
+    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
   }
 }
 
-app.on('window-all-closed', () => {
-  win = null
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
-})
-
-app.on('second-instance', () => {
-  if (win) {
-    // Focus on the main window if the user tried to open another
-    if (win.isMinimized()) win.restore()
-    win.focus()
-  }
-})
-
-app.on('activate', () => {
-  const allWindows = BrowserWindow.getAllWindows()
-  if (allWindows.length) {
-    allWindows[0].focus()
-  } else {
-    createWindow()
-  }
-})
-
 app.whenReady().then(createWindow)
+
+app.on('window-all-closed', () => {
+  app.quit()
+})
+
+// ===== IPC 处理 =====
+
+// 保存表单配置到本地
+ipcMain.handle('save-config', async (_event, config) => {
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+// 读取本地表单配置
+ipcMain.handle('load-config', async () => {
+  try {
+    if (fs.existsSync(configPath)) {
+      const data = fs.readFileSync(configPath, 'utf-8')
+      return { success: true, data: JSON.parse(data) }
+    }
+    return { success: true, data: null }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+// 打开文件选择对话框（选择 Python 脚本）
+ipcMain.handle('select-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择 Python 脚本',
+    filters: [
+      { name: 'Python 文件', extensions: ['py'] },
+      { name: '所有文件', extensions: ['*'] },
+    ],
+    properties: ['openFile'],
+  })
+  if (result.canceled) {
+    return { success: false, canceled: true }
+  }
+  return { success: true, filePath: result.filePaths[0] }
+})
+
+// 获取内置脚本路径
+ipcMain.handle('get-builtin-script-path', async () => {
+  // 打包后在 resources/scripts 目录，开发时在项目的 scripts 目录
+  let scriptsDir
+  if (app.isPackaged) {
+    scriptsDir = path.join(process.resourcesPath, 'scripts')
+  } else {
+    scriptsDir = path.join(__dirname, '..', 'scripts')
+  }
+
+  try {
+    const files = fs.readdirSync(scriptsDir).filter(f => f.endsWith('.py'))
+    return { success: true, scriptsDir, files }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+// 运行 Python 脚本
+ipcMain.handle('run-python', async (_event, { scriptPath, params }) => {
+  return new Promise((resolve) => {
+    // 将参数转为 JSON 字符串，通过命令行参数传递给 Python 脚本
+    const paramsJson = JSON.stringify(params)
+    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3'
+
+    const child = spawn(pythonCmd, [scriptPath, paramsJson], {
+      detached: false,
+    })
+
+    // 不做 unref 并且处理标准输出，让其能在主进程控制台打印出来
+    child.stdout.on('data', (data) => {
+      console.log(`[Python Output]: ${data}`)
+    })
+
+    child.stderr.on('data', (data) => {
+      console.error(`[Python Error]: ${data}`)
+    })
+
+    child.on('error', (err) => {
+      resolve({ success: false, error: `无法启动 Python: ${err.message}` })
+    })
+
+    child.on('close', (code) => {
+      console.log(`[Python] 进程退出，退出码: ${code}`)
+    })
+
+    // 确认进程启动成功
+    setTimeout(() => {
+      resolve({ success: true, pid: child.pid })
+    }, 500)
+  })
+})
