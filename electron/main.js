@@ -24,7 +24,7 @@ function createWindow() {
   mainWindow.setMenu(null)
 
   // 默认打开控制台（DevTools）
-  mainWindow.webContents.openDevTools()
+  // mainWindow.webContents.openDevTools()
 
   // 开发环境加载 vite dev server，生产环境加载打包后的文件
   if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
@@ -100,35 +100,43 @@ ipcMain.handle('get-builtin-script-path', async () => {
   }
 })
 
-// 运行 Python 脚本
+// 运行 Python 脚本（YADE 脚本需要用 yade 命令执行）
 ipcMain.handle('run-python', async (_event, { scriptPath, params }) => {
   return new Promise((resolve) => {
     // 将参数转为 JSON 字符串，通过命令行参数传递给 Python 脚本
     const paramsJson = JSON.stringify(params)
-    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3'
+    // YADE 脚本必须使用 yade 命令运行，而非 python3
+    const yadeCmd = '/home/wly/yade/install/bin/yade'
+    const scriptDir = path.dirname(scriptPath)
 
-    const child = spawn(pythonCmd, [scriptPath, paramsJson], {
-      detached: false,
-    })
+    // 清理 snap/VSCode 注入的环境变量，避免 snap 库与 YADE Qt 冲突
+    const cleanEnv = {}
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k.includes('SNAP') || k === 'LOCPATH' || k === 'GTK_PATH' ||
+          k === 'GTK_IM_MODULE_FILE' || k === 'GIO_MODULE_DIR' ||
+          k === 'GSETTINGS_SCHEMA_DIR' || k === 'GTK_EXE_PREFIX' ||
+          k === 'GIO_LAUNCHED_DESKTOP_FILE') continue
+      cleanEnv[k] = v
+    }
+    cleanEnv.DISPLAY = process.env.DISPLAY || ':0'
 
-    // 不做 unref 并且处理标准输出，让其能在主进程控制台打印出来
-    child.stdout.on('data', (data) => {
-      console.log(`[Python Output]: ${data}`)
+    // 用 gnome-terminal 启动 YADE，提供真正的 TTY 以支持 Qt 事件循环和图形界面
+    const child = spawn('gnome-terminal', [
+      '--title=YADE 仿真',
+      '--', 'bash', '-c',
+      `cd '${scriptDir}' && '${yadeCmd}' '${scriptPath}' '${paramsJson.replace(/'/g, "'\\''")}'`
+    ], {
+      detached: true,
+      env: cleanEnv,
+      stdio: 'ignore',
     })
-
-    child.stderr.on('data', (data) => {
-      console.error(`[Python Error]: ${data}`)
-    })
+    child.unref()
 
     child.on('error', (err) => {
-      resolve({ success: false, error: `无法启动 Python: ${err.message}` })
+      resolve({ success: false, error: `无法启动 YADE: ${err.message}` })
     })
 
-    child.on('close', (code) => {
-      console.log(`[Python] 进程退出，退出码: ${code}`)
-    })
-
-    // 确认进程启动成功
+    // gnome-terminal 启动后会立即返回，YADE 在新终端窗口中运行
     setTimeout(() => {
       resolve({ success: true, pid: child.pid })
     }, 500)

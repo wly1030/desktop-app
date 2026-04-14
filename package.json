@@ -1,18 +1,22 @@
 {
-  "name": "tongji2",
+  "name": "yade-tuning-tool",
   "version": "1.0.0",
   "description": "Ubuntu 桌面应用 - 表单参数配置并运行 Python 脚本",
+  "author": {
+    "name": "wly",
+    "email": "wly@example.com"
+  },
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && DISPLAY=:0 electron . --disable-gpu\"",
     "electron:build": "vite build && electron-builder",
     "electron:preview": "vite build && electron ."
   },
   "build": {
-    "appId": "com.tongji2.app",
-    "productName": "Tongji2",
+    "appId": "com.YADE调参工具.app",
+    "productName": "YADE调参工具",
     "linux": {
       "target": [
         "deb",
